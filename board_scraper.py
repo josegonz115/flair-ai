@@ -1,9 +1,11 @@
 import requests
 from bs4 import BeautifulSoup
 import re
-import os
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict
 import logging
+from supabase_config import supabase, BUCKET_NAME
+
+
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -17,6 +19,60 @@ class PinterestBoardScraper:
     def __init__(self, base_url: str = "https://pinterest.com/"):
         """Initialize the scraper with the base Pinterest URL."""
         self.base_url = base_url
+
+
+    def download_images(
+        self,
+        image_list: List[Dict],
+        # output_dir: str = "scraped_images",
+        username: str = None,
+        board_name: str = None,
+    ) -> List[str]:
+        """
+        Download images from scraped URLs to Supabase Storage.
+
+        Args:
+            image_list: List of dictionaries containing image sources
+            output_dir: Directory to save downloaded images (used for naming)
+            username: Optional username to create subdirectory
+            board_name: Optional board name to create subdirectory
+
+        Returns:
+            List of public URLs to the uploaded images in Supabase Storage
+        """
+
+        uploaded_urls = []
+
+        for i, image in enumerate(image_list):
+            src = image.get("src")
+            if not src:
+                continue
+
+            try:
+                filename = f"pin_{i}.jpg"
+
+                img_response = requests.get(src, stream=True)
+                img_response.raise_for_status()
+
+                file_path = f"{username}/{board_name}/{filename}" if username and board_name else filename
+                result = supabase.storage.from_(BUCKET_NAME).upload(
+                    file=img_response.raw.read(),
+                    path=file_path,
+                    file_options={"content-type": "image/jpeg", "upsert": 'true'}, 
+                )
+
+                if not result.path: # no result.error?
+                    logger.error(f"Supabase upload error: {result}")
+                    continue
+
+                public_url = supabase.storage.from_(BUCKET_NAME).get_public_url(file_path)
+                uploaded_urls.append(public_url)
+                logger.info(f"Uploaded image {i + 1}/{len(image_list)} to Supabase: {public_url}")
+
+            except (requests.RequestException, IOError) as e:
+                logger.error(f"Error downloading/uploading image {i + 1}: {e}")
+
+        return uploaded_urls
 
     def get_board_info(self, username: str, board_name: str) -> Dict:
         """
@@ -98,66 +154,6 @@ class PinterestBoardScraper:
         except requests.RequestException as e:
             logger.error(f"Error scraping pins: {e}")
             return []
-
-    def download_images(
-        self,
-        image_list: List[Dict],
-        output_dir: str = "scraped_images",
-        username: str = None,
-        board_name: str = None,
-    ) -> List[str]:
-        """
-        Download images from scraped URLs to the specified directory.
-
-        Args:
-            image_list: List of dictionaries containing image sources
-            output_dir: Directory to save downloaded images
-            username: Optional username to create subdirectory
-            board_name: Optional board name to create subdirectory
-
-        Returns:
-            List of paths to downloaded images
-        """
-        # Create output directory if it doesn't exist
-        os.makedirs(output_dir, exist_ok=True)
-
-        # Create nested directory structure if username and board_name are provided
-        if username and board_name:
-            nested_dir = os.path.join(output_dir, username, board_name)
-            os.makedirs(nested_dir, exist_ok=True)
-            # Use the nested directory for downloads
-            target_dir = nested_dir
-        else:
-            target_dir = output_dir
-
-        downloaded_paths = []
-
-        for i, image in enumerate(image_list):
-            src = image.get("src")
-            if not src:
-                continue
-
-            try:
-                # Generate filename from URL or index
-                filename = f"pin_{i}.jpg"
-                filepath = os.path.join(target_dir, filename)
-
-                # Download the image
-                img_response = requests.get(src, stream=True)
-                img_response.raise_for_status()
-
-                with open(filepath, "wb") as f:
-                    for chunk in img_response.iter_content(1024):
-                        f.write(chunk)
-
-                downloaded_paths.append(filepath)
-                logger.info(f"Downloaded image {i + 1}/{len(image_list)}: {filepath}")
-
-            except (requests.RequestException, IOError) as e:
-                logger.error(f"Error downloading image {i + 1}: {e}")
-
-        return downloaded_paths
-
 
 # if __name__ == "__main__":
 #     scraper = PinterestBoardScraper()

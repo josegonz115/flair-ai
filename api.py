@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 import os
 import base64
 from werkzeug.utils import secure_filename
@@ -15,6 +16,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+CORS(app) # enable cors for all 
 
 # Configuration
 UPLOAD_FOLDER = "uploaded_images"
@@ -99,12 +101,11 @@ def fashion_finder():
         pins = scraper.scrape_pins(username, board_name, quality="736x")
         if not pins:
             return jsonify({"error": "No pins found on the board"}), 404
-
-        # Download images
-        target_dir = os.path.join(SCRAPED_FOLDER, username, board_name)
-        image_paths = scraper.download_images(
-            pins, output_dir=SCRAPED_FOLDER, username=username, board_name=board_name
+        
+        uploaded_urls = scraper.download_images(
+            pins, username=username, board_name=board_name
         )
+
 
         # Save uploaded base64 images
         upload_paths = []
@@ -113,18 +114,25 @@ def fashion_finder():
             if path:
                 upload_paths.append(path)
 
-        # If no images were uploaded, just return the scraped images
+        # if no images were uploaded, just return the scraped images
         if not upload_paths:
             return jsonify(
                 {
                     "board_info": board_info,
-                    "scraped_images": [{"path": path} for path in image_paths],
+                    "scraped_images": [{"path": path} for path in uploaded_urls],
                     "similar_images": [],
                 }
             )
 
         # Find similar images
-        similarity_payload = {"images": images_base64, "library_directory": target_dir}
+        # similarity_payload = {"images": images_base64, "library_directory": target_dir}
+        target_dir = os.path.join(SCRAPED_FOLDER, username, board_name)
+        similarity_payload = {
+            "images": images_base64, 
+            "library_directory": target_dir,
+            "username": username,
+            "board_name": board_name
+        }
 
         similarity_results = find_similar_images(similarity_payload)
         # returns {"results": results, "best_overall_matches": best_overall_matches}
@@ -133,10 +141,11 @@ def fashion_finder():
         return jsonify(
             {
                 "board_info": board_info,
-                "scraped_images_count": len(image_paths),
+                "scraped_images_count": len(uploaded_urls),
                 "uploaded_images_count": len(upload_paths),
                 "similarity_results": similarity_results.get("results", []),
-                "best_overall_match": similarity_results.get("best_overall_matches", [])
+                "best_overall_matches": similarity_results.get("best_overall_matches", []),
+                "uploaded_matches": similarity_results.get("uploaded_matches", [])
             }
         )
 
@@ -165,11 +174,10 @@ def scrape_board():
         board_info = scraper.get_board_info(username, board_name)
         pins = scraper.scrape_pins(username, board_name, quality="736x")
 
-        # Download images if requested
+        # download images if requested to supabase
         if data.get("download_images", False):
-            image_paths = scraper.download_images(
+            uploaded_urls = scraper.download_images(
                 pins,
-                output_dir=SCRAPED_FOLDER,
                 username=username,
                 board_name=board_name,
             )
@@ -177,8 +185,8 @@ def scrape_board():
                 {
                     "board_info": board_info,
                     "pins_count": len(pins),
-                    "downloaded_images": len(image_paths),
-                    "storage_path": os.path.join(SCRAPED_FOLDER, username, board_name),
+                    "uploaded_images": len(uploaded_urls),
+                    "uploaded_urls": uploaded_urls
                 }
             )
 
@@ -213,22 +221,37 @@ def find_similar():
             if not username or not board_name:
                 return jsonify({"error": "Invalid Pinterest board URL format"}), 400
 
-            library_dir = os.path.join(SCRAPED_FOLDER, username, board_name)
+            similarity_payload = {
+                "images": images_base64,
+                "username": username,
+                "board_name": board_name,
+                "use_supabase": True  
+            }
         else:
-            # Use a default or specified library directory
-            library_dir = data.get("library_directory", SCRAPED_FOLDER)
-
-        # Check if the library directory exists
-        if not os.path.exists(library_dir):
-            return jsonify(
-                {"error": f"Library directory {library_dir} does not exist"}
-            ), 404
-
-        # Find similar images
-        similarity_payload = {"images": images_base64, "library_directory": library_dir}
+            use_supabase = data.get("use_supabase", False)
+            username = data.get("username")
+            board_name = data.get("board_name")
+            
+            if use_supabase and (not username or not board_name):
+                return jsonify({"error": "Username and board name required for Supabase storage"}), 400
+            
+            if use_supabase:
+                similarity_payload = {
+                    "images": images_base64,
+                    "username": username,
+                    "board_name": board_name,
+                    "use_supabase": True
+                }
+            else:
+                # Fallback to local directory
+                library_dir = data.get("library_directory", SCRAPED_FOLDER)
+                similarity_payload = {
+                    "images": images_base64,
+                    "library_directory": library_dir,
+                    "use_supabase": False
+                }
 
         similarity_results = find_similar_images(similarity_payload)
-
         return jsonify(similarity_results)
 
     except Exception as e:

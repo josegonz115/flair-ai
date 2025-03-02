@@ -10,6 +10,8 @@ from tensorflow.keras.applications.resnet50 import preprocess_input
 from tensorflow.keras.preprocessing.image import img_to_array
 from sklearn.metrics.pairwise import cosine_similarity
 import logging
+import requests
+from supabase_config import supabase, BUCKET_NAME
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -28,11 +30,12 @@ def extract_features(img):
     features = model.predict(img_array)
     return features[0]
 
-
 def find_similar_images(request_data):
     # Parse the input JSON
     images_base64 = request_data.get("images", [])
     library_dir = request_data.get("library_directory", "")
+    username = request_data.get("username", "")
+    board_name = request_data.get("board_name", "")
 
     if not images_base64 or not library_dir:
         return {"error": "Missing required inputs"}
@@ -114,8 +117,67 @@ def find_similar_images(request_data):
             
         best_overall_matches.append(best_match)
     
+    # Upload best matches to Supabase if username and board_name are provided
+    if username and board_name:
+        uploaded_matches = upload_matches_to_supabase(best_overall_matches, username, board_name)
+        return {
+            "results": results, 
+            "best_overall_matches": best_overall_matches,
+            "uploaded_matches": uploaded_matches
+        }
+    
     return {"results": results, "best_overall_matches": best_overall_matches}
 
+
+def upload_matches_to_supabase(matches, username, board_name, match_folder="match"):
+    """
+    Upload best matching images to Supabase Storage in a structure:
+    username/board_name/match/match_X.jpg
+    
+    Args:
+        matches: List of match dictionaries with paths
+        username: Pinterest username
+        board_name: Name of the board
+        match_folder: Subfolder name for matches
+        
+    Returns:
+        List of public URLs to the uploaded matches
+    """
+    uploaded_urls = []
+    
+    for i, match in enumerate(matches):
+        try:
+            # Open the matched image
+            img_path = match["path"]
+            with open(img_path, 'rb') as file:
+                img_data = file.read()
+            
+            # Define storage path
+            filename = f"match_{i}.jpg"
+            file_path = f"{username}/{board_name}/{match_folder}/{filename}"
+            
+            # Upload to Supabase
+            result = supabase.storage.from_(BUCKET_NAME).upload(
+                file=img_data,
+                path=file_path,
+                    file_options={"content-type": "image/jpeg", "upsert": 'true'},             
+            )
+            
+            if not result.path:
+                logger.error(f"Supabase upload error: {result}")
+                continue
+                
+            public_url = supabase.storage.from_(BUCKET_NAME).get_public_url(file_path)
+            uploaded_urls.append(public_url)
+            
+            # Add the URL to the match object
+            match["supabase_url"] = public_url
+            logger.info(f"Uploaded match {i+1}/{len(matches)} to Supabase: {public_url}")
+            
+        except Exception as e:
+            logger.error(f"Error uploading match {i+1}: {e}")
+    
+    return uploaded_urls
 
 
 # if __name__ == "__main__":
