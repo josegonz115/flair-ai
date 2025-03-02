@@ -159,26 +159,26 @@ class PinterestBoardScraper:
         return downloaded_paths
 
 
-if __name__ == "__main__":
-    scraper = PinterestBoardScraper()
+# if __name__ == "__main__":
+#     scraper = PinterestBoardScraper()
 
-username = "thammili"
-board_name = "fashion"
+# username = "thammili"
+# board_name = "fashion"
 
-board_info = scraper.get_board_info(username, board_name)
-print(f"Board: {board_info['title']} ({board_info['total_pins']} pins)")
+# board_info = scraper.get_board_info(username, board_name)
+# print(f"Board: {board_info['title']} ({board_info['total_pins']} pins)")
 
-images = scraper.scrape_pins(username, board_name, quality="736x")
-print(f"Found {len(images)} images")
+# images = scraper.scrape_pins(username, board_name, quality="736x")
+# print(f"Found {len(images)} images")
 
-base_dir = "pictures"
-# image_paths_base = scraper.download_images(images, output_dir=base_dir)
-# print(f"Downloaded {len(image_paths_base)} images to {base_dir}")
+# base_dir = "pictures"
+# # image_paths_base = scraper.download_images(images, output_dir=base_dir)
+# # print(f"Downloaded {len(image_paths_base)} images to {base_dir}")
 
-# Download to nested directory structure
-image_paths_nested = scraper.download_images(
-    images, output_dir=base_dir, username=username, board_name=board_name
-)
-print(
-    f"Downloaded {len(image_paths_nested)} images to {base_dir}/{username}/{board_name}"
-)
+# # Download to nested directory structure
+# image_paths_nested = scraper.download_images(
+#     images, output_dir=base_dir, username=username, board_name=board_name
+# )
+# print(
+#     f"Downloaded {len(image_paths_nested)} images to {base_dir}/{username}/{board_name}"
+# )
